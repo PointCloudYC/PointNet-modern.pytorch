@@ -3,7 +3,7 @@ data_root: ''
 num_classes: 13
 input_features_dim: 4
 batch_size: 8
-num_points: 15000
+num_points: 15000 # 15000
 num_workers: 4
 # data augmentation
 x_angle_range: 0.0
@@ -22,10 +22,10 @@ augment_symmetries:
 # ---------------------------------------------------------------------------- #
 # Model
 # ---------------------------------------------------------------------------- #
-# backbone: 'resnet'
-# head: 'resnet_scene_seg'
-# radius: 0.1
-# sampleDl: 0.04
+backbone: 'mlp'
+head: 'mlp_sem_seg'
+radius: 0.1
+sampleDl: 0.04
 # nsamples:
 #   - 26
 #   - 31
@@ -40,8 +40,8 @@ augment_symmetries:
 # width: 144
 # depth: 2
 # bottleneck_ratio: 2
-# in_radius: 2.0
-# num_steps: 2000
+in_radius: 2.0
+num_steps: 2000
 
 # ---------------------------------------------------------------------------- #
 # Training options
