@@ -1,0 +1,1 @@
+from .pointnet_semseg import PointNetSemSeg

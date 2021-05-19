@@ -30,6 +30,9 @@ config.density_parameter = 5.0
 config.nsamples = []
 config.npoints = []
 config.bn_momentum = 0.1
+config.point_transform = False
+config.feature_transform = False
+# config.dropout_rate = 0.6
 
 # ---------------------------------------------------------------------------- #
 # Data options

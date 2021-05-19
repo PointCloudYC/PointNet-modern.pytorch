@@ -9,6 +9,14 @@ import json
 import random
 import numpy as np
 
+# pytorch
+import torch
+import torch.nn as nn
+from torchvision import transforms
+import torch.distributed as dist
+from torch.utils.tensorboard import SummaryWriter
+from torch.nn.parallel import DistributedDataParallel
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
 sys.path.append(ROOT_DIR)
@@ -17,14 +25,6 @@ sys.path.append(ROOT_DIR)
 import argparse
 from utils.config import config, update_config
 from utils.logger import setup_logger
-
-# pytorch
-import torch
-import torch.nn as nn
-from torchvision import transforms
-import torch.distributed as dist
-from torch.utils.tensorboard import SummaryWriter
-from torch.nn.parallel import DistributedDataParallel
 
 # import datasets.data_utils as d_utils
 # from models import build_scene_segmentation # models/build.py

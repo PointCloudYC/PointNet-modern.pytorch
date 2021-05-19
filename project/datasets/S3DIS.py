@@ -1,7 +1,6 @@
 import os
 import sys
 import pickle
-
 import numpy as np
 from sklearn.neighbors import KDTree
 
