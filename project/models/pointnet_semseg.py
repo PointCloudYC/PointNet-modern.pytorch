@@ -2,7 +2,6 @@
 import os
 import sys
 import numpy as np
-from sklearn.metrics import precision_score,recall_score,f1_score
 
 import torch
 import torch.nn as nn
@@ -16,7 +15,7 @@ sys.path.append(ROOT_DIR)
 import datasets.data_utils as d_utils
 
 class TNet(nn.Module):
-    """align the input or intermediate features
+    """align the input or intermediate features, regressing to a kxk matrix
     """
     def __init__(self,k):
         super(TNet, self).__init__()
@@ -27,7 +26,6 @@ class TNet(nn.Module):
         self.fc1 = nn.Linear(1024, 512)
         self.fc2 = nn.Linear(512, 256)
         self.fc3 = nn.Linear(256, self.k*self.k)
-        self.relu = nn.ReLU()
 
         self.bn1 = nn.BatchNorm1d(64)
         self.bn2 = nn.BatchNorm1d(128)
@@ -51,7 +49,7 @@ class TNet(nn.Module):
 
         x = F.relu(self.bn4(self.fc1(x))) # Bx512
         x = F.relu(self.bn5(self.fc2(x))) # Bx256
-        x = self.fc3(x) #Bxk
+        x = self.fc3(x) #Bxk^2
 
         # use variable so as to be able to learn them, Bxk^2
         identity = Variable(torch.eye(self.k,dtype=torch.float32).flatten()).view(1,self.k*self.k).repeat(batch_size,1) 
@@ -136,12 +134,12 @@ class PointNetSemSeg(nn.Module):
 
         # tnet1 for input features
         if self.point_transform:
-            transform_point = self.tnet1(xyz)
+            transform_input = self.tnet1(xyz)
             xyz = xyz.transpose(2, 1) # BxNx3
-            xyz = torch.bmm(xyz, transform_point) # BxNx3
+            xyz = torch.bmm(xyz, transform_input) # BxNx3
             xyz = xyz.transpose(2, 1) # Bx3xN
         else:
-            transform_point = None
+            transform_input = None
 
         x= torch.cat((xyz,features),dim=1) # Bx(3+input_features_dim)xN
 
@@ -177,7 +175,7 @@ class PointNetSemSeg(nn.Module):
         # apply log softmax on each image's output (this is recommended over applying softmax
         # since it is numerically more stable)
         # return F.log_softmax(x, dim=1), transform_point, transform_feature
-        return logits, transform_point, transform_feature
+        return logits, transform_input, transform_feature
 
 
 if __name__ == "__main__":
