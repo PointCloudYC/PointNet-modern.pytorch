@@ -14,6 +14,14 @@ import matplotlib as mpl
 # mpl.rc('ytick', labelsize=12)
 import seaborn as sns
 
+def feature_transform_regularizer(trans):
+    dim = trans.size()[1]
+    batch_size = trans.size()[0]
+    I = torch.eye(dim)[None, :, :]
+    if trans.is_cuda:
+        I = I.cuda()
+    loss = torch.mean(torch.norm(torch.bmm(trans, trans.transpose(2,1)) - I, dim=(1,2)))
+    return loss
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""

@@ -7,7 +7,7 @@ from sklearn.neighbors import KDTree
 import torch
 import torch.utils.data as data
 # from .data_utils import grid_subsampling
-from data_utils import grid_subsampling
+from .data_utils import grid_subsampling
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)

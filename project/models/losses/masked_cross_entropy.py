@@ -1,13 +1,14 @@
+import sys
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CUR_DIR = os.path.dirname(CUR_DIR)
-ROOT_DIR = os.path.dirname(ROOT_DIR)
+ROOT_DIR = os.path.dirname(BASE_DIR)
 sys.path.append(ROOT_DIR)
 
-from datasets.data_utils as d_utils
+import utils.util as util
 
 class MaskedCrossEntropy(nn.Module):
     def __init__(self):
@@ -32,7 +33,7 @@ class MaskedCrossEntropy(nn.Module):
         loss = loss.sum() / mask.sum()
         
         if transform_feature is not None:
-            loss = loss + 0.001 * d_utils.feature_transform_regularizer(transform_feature)
+            loss = loss + 0.001 * util.feature_transform_regularizer(transform_feature)
         else:
             loss = loss
         return loss

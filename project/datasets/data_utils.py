@@ -38,14 +38,6 @@ def grid_subsampling(points, features=None, labels=None, sampleDl=0.1, verbose=0
     else:
         return cpp_subsampling.compute(points, features=features, classes=labels, sampleDl=sampleDl, verbose=verbose)
 
-def feature_transform_regularizer(trans):
-    dim = trans.size()[1]
-    batch_size = trans.size()[0]
-    I = torch.eye(dim)[None, :, :]
-    if trans.is_cuda:
-        I = I.cuda()
-    loss = torch.mean(torch.norm(torch.bmm(trans, trans.transpose(2,1)) - I, dim=(1,2)))
-    return loss
 
 
 def angle_axis(angle, axis):
