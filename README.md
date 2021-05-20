@@ -14,6 +14,7 @@ Replicate PointNet using pytorch with good readability and flexibility.
 - `cuda=10.1`
 - others: `pip install termcolor opencv-python tensorboard h5py easydict`
 
+You can install all packages using `bash install.sh`
 
 ### Datasets
 **Shape Classification on ModelNet40**
@@ -61,6 +62,7 @@ The file structure should look like:
 
 ### Compile custom operators and pre-processing data
 ```bash
+cd project
 sh init.sh
 ```
 
