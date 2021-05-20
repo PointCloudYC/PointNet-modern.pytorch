@@ -1,1 +1,1 @@
-from .pointnet_semseg import PointNetSemSeg
+from .pointnet_semseg import PointNetSemSeg, get_masked_CE_loss

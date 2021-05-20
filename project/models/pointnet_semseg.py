@@ -10,9 +10,11 @@ from torch.autograd import Variable
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
+sys.path.append(BASE_DIR)
 sys.path.append(ROOT_DIR)
 
 import datasets.data_utils as d_utils
+from losses import MaskedCrossEntropy
 
 class TNet(nn.Module):
     """align the input or intermediate features, regressing to a kxk matrix
@@ -177,6 +179,9 @@ class PointNetSemSeg(nn.Module):
         # return F.log_softmax(x, dim=1), transform_point, transform_feature
         return logits, transform_input, transform_feature
 
+def get_masked_CE_loss():
+    criterion = MaskedCrossEntropy()
+    return criterion
 
 if __name__ == "__main__":
     # obtain config

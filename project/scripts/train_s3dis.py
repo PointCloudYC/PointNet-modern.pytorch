@@ -26,9 +26,9 @@ import argparse
 from utils.config import config, update_config
 from utils.logger import setup_logger
 
-# import datasets.data_utils as d_utils
-# from models import build_scene_segmentation # models/build.py
-# from datasets import S3DISSeg
+from models import PointNetSemSeg, get_masked_CE_loss # models/build.py
+from datasets import S3DISSemSeg
+import datasets.data_utils as d_utils
 
 # metrics and lr scheduler
 from utils.util import AverageMeter, s3dis_metrics, sub_s3dis_metrics, s3dis_part_metrics
@@ -115,14 +115,324 @@ def parse_config():
     return args, config
 
 
+def get_loader(config):
+    # set the data loader
+    train_transforms = transforms.Compose([
+        d_utils.PointcloudToTensor(),
+        d_utils.PointcloudRandomRotate(x_range=config.x_angle_range, y_range=config.y_angle_range,
+                                       z_range=config.z_angle_range),
+        d_utils.PointcloudScaleAndJitter(scale_low=config.scale_low, scale_high=config.scale_high,
+                                         std=config.noise_std, clip=config.noise_clip,
+                                         augment_symmetries=config.augment_symmetries),
+    ])
+
+    test_transforms = transforms.Compose([
+        d_utils.PointcloudToTensor(),
+    ])
+
+    train_dataset = S3DISSemSeg(input_features_dim=config.input_features_dim,
+                             subsampling_parameter=config.sampleDl, color_drop=config.color_drop,
+                             in_radius=config.in_radius, num_points=config.num_points,
+                             num_steps=config.num_steps, num_epochs=config.epochs,
+                             transforms=train_transforms, split='train')
+
+    val_dataset = S3DISSemSeg(input_features_dim=config.input_features_dim,
+                           subsampling_parameter=config.sampleDl, color_drop=config.color_drop,
+                           in_radius=config.in_radius, num_points=config.num_points,
+                           num_steps=config.num_steps, num_epochs=20,
+                           transforms=test_transforms, split='val')
+    train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, shuffle=False)
+    train_loader = torch.utils.data.DataLoader(train_dataset,
+                                               batch_size=config.batch_size,
+                                               shuffle=False,
+                                               num_workers=config.num_workers,
+                                               pin_memory=True,
+                                               sampler=train_sampler,
+                                               drop_last=True)
+    val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset, shuffle=False)
+    val_loader = torch.utils.data.DataLoader(val_dataset,
+                                             batch_size=config.batch_size,
+                                             shuffle=False,
+                                             num_workers=config.num_workers,
+                                             pin_memory=True,
+                                             sampler=val_sampler,
+                                             drop_last=False)
+
+    return train_loader, val_loader
+
+
+def load_checkpoint(config, model, optimizer, scheduler):
+    logger.info("=> loading checkpoint '{}'".format(config.load_path))
+
+    checkpoint = torch.load(config.load_path, map_location='cpu')
+    config.start_epoch = checkpoint['epoch'] + 1
+    model.load_state_dict(checkpoint['model'])
+    optimizer.load_state_dict(checkpoint['optimizer'])
+    scheduler.load_state_dict(checkpoint['scheduler'])
+
+    logger.info("=> loaded successfully '{}' (epoch {})".format(config.load_path, checkpoint['epoch']))
+
+    del checkpoint
+    torch.cuda.empty_cache()
+
+
+def save_checkpoint(config, epoch, model, optimizer, scheduler):
+    logger.info('==> Saving...')
+    state = {
+        'config': config,
+        'model': model.state_dict(),
+        'optimizer': optimizer.state_dict(),
+        'scheduler': scheduler.state_dict(),
+        'epoch': epoch,
+    }
+    torch.save(state, os.path.join(config.log_dir, 'current.pth'))
+    if epoch % config.save_freq == 0:
+        torch.save(state, os.path.join(config.log_dir, f'ckpt_epoch_{epoch}.pth'))
+        logger.info("Saved in {}".format(os.path.join(config.log_dir, f'ckpt_epoch_{epoch}.pth')))
+
+
 def main(config):
-    pass
-    # model
+    train_loader, val_loader = get_loader(config)
+    n_data = len(train_loader.dataset)
+    logger.info(f"length of training dataset: {n_data}")
+    n_data = len(val_loader.dataset)
+    logger.info(f"length of validation dataset: {n_data}")
 
-    # loss and optimizer
+    model = PointNetSemSeg(config,config.input_features_dim)
+    # print(model)
+    criterion = get_masked_CE_loss()
 
-    # training loop
-    # evaluation loop
+
+    model.cuda()
+    criterion.cuda()
+
+    if config.optimizer == 'sgd':
+        optimizer = torch.optim.SGD(model.parameters(),
+                                    lr=config.batch_size * dist.get_world_size() / 8 * config.base_learning_rate,
+                                    momentum=config.momentum,
+                                    weight_decay=config.weight_decay)
+    elif config.optimizer == 'adam':
+        optimizer = torch.optim.Adam(model.parameters(),
+                                     lr=config.base_learning_rate,
+                                     weight_decay=config.weight_decay)
+    elif config.optimizer == 'adamW':
+        optimizer = torch.optim.AdamW(model.parameters(),
+                                      lr=config.base_learning_rate,
+                                      weight_decay=config.weight_decay)
+    else:
+        raise NotImplementedError(f"Optimizer {config.optimizer} not supported")
+
+    scheduler = get_scheduler(optimizer, len(train_loader), config)
+
+    # add find_unused_parameters=True to overcome the error "RuntimeError: Expected to have finished reduction in the prior iteration before starting a new one"
+    model = DistributedDataParallel(model, device_ids=[config.local_rank], broadcast_buffers=False,find_unused_parameters=True)
+
+    runing_vote_logits = [np.zeros((config.num_classes, l.shape[0]), dtype=np.float32) for l in
+                          val_loader.dataset.sub_clouds_points_labels]
+
+    # optionally resume from a checkpoint
+    if config.load_path:
+        assert os.path.isfile(config.load_path)
+        load_checkpoint(config, model, optimizer, scheduler)
+        logger.info("==> checking loaded ckpt")
+        validate('resume', val_loader, model, criterion, runing_vote_logits, config, num_votes=2)
+
+    # tensorboard
+    if dist.get_rank() == 0:
+        summary_writer = SummaryWriter(log_dir=config.log_dir)
+    else:
+        summary_writer = None
+
+    # routine
+    for epoch in range(config.start_epoch, config.epochs + 1):
+        train_loader.sampler.set_epoch(epoch)
+        val_loader.sampler.set_epoch(epoch)
+        train_loader.dataset.epoch = epoch - 1
+        tic = time.time()
+        loss = train(epoch, train_loader, model, criterion, optimizer, scheduler, config)
+
+        logger.info('epoch {}, total time {:.2f}, lr {:.5f}'.format(epoch,
+                                                                    (time.time() - tic),
+                                                                    optimizer.param_groups[0]['lr']))
+        if epoch % config.val_freq == 0:
+            validate(epoch, val_loader, model, criterion, runing_vote_logits, config, num_votes=2)
+
+        if dist.get_rank() == 0:
+            # save model
+            save_checkpoint(config, epoch, model, optimizer, scheduler)
+
+        if summary_writer is not None:
+            # tensorboard logger
+            summary_writer.add_scalar('ins_loss', loss, epoch)
+            summary_writer.add_scalar('learning_rate', optimizer.param_groups[0]['lr'], epoch)
+
+    validate('Last', val_loader, model, criterion, runing_vote_logits, config, num_votes=20)
+
+
+def train(epoch, train_loader, model, criterion, optimizer, scheduler, config):
+    """
+    One epoch training
+    """
+    model.train()
+
+    batch_time = AverageMeter()
+    data_time = AverageMeter()
+    loss_meter = AverageMeter()
+    end = time.time()
+
+    for idx, (points, mask, features, points_labels, cloud_label, input_inds) in enumerate(train_loader):
+        data_time.update(time.time() - end)
+        bsz = points.size(0)
+        # forward
+        points = points.cuda(non_blocking=True)
+        mask = mask.cuda(non_blocking=True)
+        features = features.cuda(non_blocking=True)
+        points_labels = points_labels.cuda(non_blocking=True)
+
+        pred,_,transform_feature = model(points,mask, features)
+        loss = criterion(pred,points_labels,mask,transform_feature)
+
+        optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 10)
+        optimizer.step()
+        scheduler.step()
+
+        # update meters
+        loss_meter.update(loss.item(), bsz)
+        batch_time.update(time.time() - end)
+        end = time.time()
+
+        # print info
+        if idx % config.print_freq == 0:
+            logger.info(f'Train: [{epoch}/{config.epochs + 1}][{idx}/{len(train_loader)}]\t'
+                        f'T {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                        f'DT {data_time.val:.3f} ({data_time.avg:.3f})\t'
+                        f'loss {loss_meter.val:.3f} ({loss_meter.avg:.3f})')
+            # logger.info(f'[{cloud_label}]: {input_inds}')
+    return loss_meter.avg
+
+
+def validate(epoch, test_loader, model, criterion, runing_vote_logits, config, num_votes=10):
+    """one epoch validating
+    Args:
+        epoch (int or str): current epoch
+        test_loader ([type]): [description]
+        model ([type]): [description]
+        criterion ([type]): [description]
+        runing_vote_logits ([type]): [description]
+        config ([type]): [description]
+        num_votes (int, optional): [description]. Defaults to 10.
+    Raises:
+        NotImplementedError: [description]
+    Returns:
+        [int]: mIoU for one epoch over the validation set
+    """
+
+    vote_logits_sum = [np.zeros((config.num_classes, l.shape[0]), dtype=np.float32) for l in
+                       test_loader.dataset.sub_clouds_points_labels]
+    vote_counts = [np.zeros((1, l.shape[0]), dtype=np.float32) + 1e-6 for l in
+                   test_loader.dataset.sub_clouds_points_labels]
+    vote_logits = [np.zeros((config.num_classes, l.shape[0]), dtype=np.float32) for l in
+                   test_loader.dataset.sub_clouds_points_labels]
+    validation_proj = test_loader.dataset.projections
+    validation_labels = test_loader.dataset.clouds_points_labels
+    test_smooth = 0.95
+
+    val_proportions = np.zeros(config.num_classes, dtype=np.float32)
+    for label_value in range(config.num_classes):
+        val_proportions[label_value] = np.sum(
+            [np.sum(labels == label_value) for labels in test_loader.dataset.clouds_points_labels])
+
+    batch_time = AverageMeter()
+    losses = AverageMeter()
+
+    model.eval()
+    with torch.no_grad():
+        end = time.time()
+        RT = d_utils.BatchPointcloudRandomRotate(x_range=config.x_angle_range, y_range=config.y_angle_range,
+                                                 z_range=config.z_angle_range)
+        TS = d_utils.BatchPointcloudScaleAndJitter(scale_low=config.scale_low, scale_high=config.scale_high,
+                                                   std=config.noise_std, clip=config.noise_clip,
+                                                   augment_symmetries=config.augment_symmetries)
+        for v in range(num_votes):
+            test_loader.dataset.epoch = (0 + v) if isinstance(epoch, str) else (epoch + v) % 20
+            predictions = []
+            targets = []
+            for idx, (points, mask, features, points_labels, cloud_label, input_inds) in enumerate(test_loader):
+                # augment for voting
+                if v > 0:
+                    points = RT(points)
+                    points = TS(points)
+                    if config.input_features_dim <= 5:
+                        pass
+                    elif config.input_features_dim == 6:
+                        color = features[:, :3, :]
+                        features = torch.cat([color, points.transpose(1, 2).contiguous()], 1)
+                    elif config.input_features_dim == 7:
+                        color_h = features[:, :4, :]
+                        features = torch.cat([color_h, points.transpose(1, 2).contiguous()], 1)
+                    else:
+                        raise NotImplementedError(
+                            f"input_features_dim {config.input_features_dim} in voting not supported")
+                # forward
+                points = points.cuda(non_blocking=True)
+                mask = mask.cuda(non_blocking=True)
+                features = features.cuda(non_blocking=True)
+                points_labels = points_labels.cuda(non_blocking=True)
+                cloud_label = cloud_label.cuda(non_blocking=True)
+                input_inds = input_inds.cuda(non_blocking=True)
+
+                pred,_,transform_feature = model(points, mask, features)
+                loss = criterion(pred, points_labels, mask, transform_feature)
+                losses.update(loss.item(), points.size(0))
+
+                # collect
+                bsz = points.shape[0]
+                for ib in range(bsz):
+                    mask_i = mask[ib].cpu().numpy().astype(np.bool)
+                    logits = pred[ib].cpu().numpy()[:, mask_i]
+                    inds = input_inds[ib].cpu().numpy()[mask_i]
+                    c_i = cloud_label[ib].item()
+                    vote_logits_sum[c_i][:, inds] = vote_logits_sum[c_i][:, inds] + logits
+                    vote_counts[c_i][:, inds] += 1
+                    vote_logits[c_i] = vote_logits_sum[c_i] / vote_counts[c_i]
+                    runing_vote_logits[c_i][:, inds] = test_smooth * runing_vote_logits[c_i][:, inds] + \
+                                                       (1 - test_smooth) * logits
+                    predictions += [logits]
+                    targets += [test_loader.dataset.sub_clouds_points_labels[c_i][inds]]
+
+                # measure elapsed time
+                batch_time.update(time.time() - end)
+                end = time.time()
+                if idx % config.print_freq == 0:
+                    logger.info(
+                        f'Test: [{idx}/{len(test_loader)}]\t'
+                        f'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                        f'Loss {losses.val:.4f} ({losses.avg:.4f})')
+
+            pIoUs, pmIoU = s3dis_part_metrics(config.num_classes, predictions, targets, val_proportions)
+
+            logger.info(f'E{epoch} V{v} * part_mIoU {pmIoU:.3%}')
+            logger.info(f'E{epoch} V{v}  * part_msIoU {pIoUs}')
+
+            runsubIoUs, runsubmIoU = sub_s3dis_metrics(config.num_classes, runing_vote_logits,
+                                                       test_loader.dataset.sub_clouds_points_labels, val_proportions)
+            logger.info(f'E{epoch} V{v} * running sub_mIoU {runsubmIoU:.3%}')
+            logger.info(f'E{epoch} V{v}  * running sub_msIoU {runsubIoUs}')
+
+            subIoUs, submIoU = sub_s3dis_metrics(config.num_classes, vote_logits,
+                                                 test_loader.dataset.sub_clouds_points_labels, val_proportions)
+            logger.info(f'E{epoch} V{v} * sub_mIoU {submIoU:.3%}')
+            logger.info(f'E{epoch} V{v}  * sub_msIoU {subIoUs}')
+
+            IoUs, mIoU = s3dis_metrics(config.num_classes, vote_logits, validation_proj, validation_labels)
+            logger.info(f'E{epoch} V{v} * mIoU {mIoU:.3%}')
+            logger.info(f'E{epoch} V{v}  * msIoU {IoUs}')
+
+    return mIoU
+
+
 
 
 if __name__ == "__main__":
