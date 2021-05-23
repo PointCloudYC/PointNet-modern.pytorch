@@ -458,4 +458,6 @@ if __name__ == "__main__":
             json.dump(vars(config), f, indent=2)
             os.system('cp %s %s' % (args.cfg, config.log_dir))
         logger.info("Full config saved to {}".format(path))
+
+    # main function
     main(config)
