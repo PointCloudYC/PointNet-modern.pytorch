@@ -6,7 +6,14 @@ modified by Chao YIN
 import torch
 import torch.nn as nn
 
-from .pointnet2_modules import PointnetSAModuleMSG
+import os,sys
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(os.path.dirname(BASE_DIR))
+sys.path.append(BASE_DIR)
+sys.path.append(ROOT_DIR)
+sys.path.append(os.path.join(ROOT_DIR, 'models')) # for loss module
+sys.path.append(os.path.join(ROOT_DIR, 'ops','pointnet2_ops_lib', 'pointnet2_ops'))
+from pointnet2_modules import PointnetFPModule, PointnetSAModuleMSG
 from .pointnet2_ssg_semseg import PointNet2SSGSemSeg
 
 

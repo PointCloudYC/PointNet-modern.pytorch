@@ -22,6 +22,7 @@ config.grid_clip_norm = -1
 # ---------------------------------------------------------------------------- #
 # Model
 # ---------------------------------------------------------------------------- #
+config.model_name = 'pointnet2ssg' # pointnet, pointnet2msg
 config.backbone = 'mlp'
 config.head = 'mlp_cls'
 config.radius = 0.05

@@ -8,8 +8,13 @@ import torch.nn.functional as F
 
 import os,sys
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(os.path.dirname(BASE_DIR))
 sys.path.append(BASE_DIR)
+sys.path.append(ROOT_DIR)
+sys.path.append(os.path.join(ROOT_DIR, 'models')) # for loss module
+sys.path.append(os.path.join(ROOT_DIR, 'ops','pointnet2_ops_lib', 'pointnet2_ops'))
 from pointnet2_modules import PointnetSAModule
+
 
 class PointNet2SSGCls(nn.Module):
     def __init__(self, config, input_features_dim):
@@ -85,7 +90,7 @@ class PointNet2SSGCls(nn.Module):
 if __name__ == "__main__":
     # obtain config
     import argparse
-    from ..utils.config import config, update_config
+    from utils.config import config, update_config
     parser = argparse.ArgumentParser('ModelNet40 classification training')
     parser.add_argument('--cfg', type=str, default='project/cfgs/modelnet/pointnet2_ssg.yaml', help='config file')
     args, unparsed = parser.parse_known_args()
@@ -96,6 +101,9 @@ if __name__ == "__main__":
     # create a model
     model = PointNet2SSGCls(config,config.input_features_dim)
     print(model)
+    # IMPORTANT: place model to GPU so that be able to test GPU CUDA ops
+    if torch.cuda.is_available():
+        model=model.cuda()
 
     # define a loss
     from losses import MaskedCrossEntropy
@@ -105,11 +113,13 @@ if __name__ == "__main__":
     batch_size = 2 # config.batch_size  
     num_points = config.num_points
     input_features_dim = config.input_features_dim
-    xyz = torch.rand(batch_size,num_points,3)
-    mask= torch.ones(batch_size,num_points)
-    features = torch.rand(batch_size,input_features_dim,num_points)
-    labels = torch.ones(batch_size,num_points,dtype=torch.long)
+    # IMPORTANT: place these tensors to GPU so that be able to test GPU CUDA ops
+    xyz = torch.rand(batch_size,num_points,3).cuda()
+    mask= torch.ones(batch_size,num_points).cuda()
+    features = torch.rand(batch_size,input_features_dim,num_points).cuda()
+    labels = torch.ones(batch_size,num_points,dtype=torch.long).cuda()
 
+    # torch.cuda.set_device(0)
     preds = model(xyz, mask, features)
     print(preds.shape, preds)
 

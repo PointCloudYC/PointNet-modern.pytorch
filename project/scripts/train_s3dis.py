@@ -26,7 +26,7 @@ import argparse
 from utils.config import config, update_config
 from utils.logger import setup_logger
 
-from models import PointNetSemSeg, get_masked_CE_loss # models/build.py
+from models import PointNetSemSeg, PointNet2SSGSemSeg, PointNet2MSGSemSeg , get_masked_CE_loss # models/build.py
 from datasets import S3DISSemSeg
 import datasets.data_utils as d_utils
 
@@ -46,7 +46,8 @@ def parse_config():
         tuple: (args, config) contains config settings where args is argparse.Namespace object while config is a dict
     """
     parser = argparse.ArgumentParser('S3DIS semantic segmentation training')
-    parser.add_argument('--cfg', type=str, default='project/cfgs/s3dis/pointnet.yaml', help='config file')
+    parser.add_argument('--cfg', type=str, default='project/cfgs/s3dis/pointnet2_ssg.yaml', help='config file')
+    # parser.add_argument('--model_name', type=str, default='', help='model name, pointnet, pointnet2ssg, pointnet2msg')
     parser.add_argument('--data_root', type=str, default='data', help='root director of dataset')
     parser.add_argument('--num_workers', type=int, default=4, help='num of workers to use')
     parser.add_argument('--batch_size', type=int, help='batch_size')
@@ -86,6 +87,8 @@ def parse_config():
     config.local_rank = args.local_rank
     
     model_name = args.cfg.split('.')[-2].split('/')[-1] # model name, e.g., pointnet
+    # supports: pointnet,pointnet2{ssg,msg}
+    config.model_name = model_name
     current_time = datetime.now().strftime('%Y%m%d%H%M%S') #20210518221044 means 2021, 5.18, 22:10:44
     config.log_dir = os.path.join(args.log_dir, 's3dis', f'{model_name}_{int(current_time)}') ## log_dir=log/s3dis/pointnet_time 
 
@@ -198,7 +201,15 @@ def main(config):
     n_data = len(val_loader.dataset)
     logger.info(f"length of validation dataset: {n_data}")
 
-    model = PointNetSemSeg(config,config.input_features_dim)
+    if config.model_name == 'pointnet':
+        model = PointNetSemSeg(config,config.input_features_dim)
+    elif config.model_name =='pointnet2_ssg':
+        model = PointNet2SSGSemSeg(config,config.input_features_dim)
+    elif config.model_name =='pointnet2_msg':
+        model = PointNet2MSGSemSeg(config,config.input_features_dim)
+    else:
+        raise NotImplementedError("error")
+
     # print(model)
     criterion = get_masked_CE_loss()
 
@@ -289,8 +300,12 @@ def train(epoch, train_loader, model, criterion, optimizer, scheduler, config):
         features = features.cuda(non_blocking=True)
         points_labels = points_labels.cuda(non_blocking=True)
 
-        pred,_,transform_feature = model(points,mask, features)
-        loss = criterion(pred,points_labels,mask,transform_feature)
+        if config.model_name == 'pointnet':
+            pred,_,transform_feature = model(points,mask, features)
+            loss = criterion(pred,points_labels,mask,transform_feature)
+        else:
+            pred = model(points,mask, features)
+            loss = criterion(pred,points_labels,mask)
 
         optimizer.zero_grad()
         loss.backward()
@@ -383,8 +398,13 @@ def validate(epoch, test_loader, model, criterion, runing_vote_logits, config, n
                 cloud_label = cloud_label.cuda(non_blocking=True)
                 input_inds = input_inds.cuda(non_blocking=True)
 
-                pred,_,transform_feature = model(points, mask, features)
-                loss = criterion(pred, points_labels, mask, transform_feature)
+                if config.model_name == 'pointnet':
+                    pred,_,transform_feature = model(points,mask, features)
+                    loss = criterion(pred,points_labels,mask,transform_feature)
+                else:
+                    pred = model(points,mask, features)
+                    loss = criterion(pred,points_labels,mask)
+
                 losses.update(loss.item(), points.size(0))
 
                 # collect
