@@ -13,4 +13,3 @@ setup(
     install_requires=['torch'],
     packages=find_packages(),
 )
-

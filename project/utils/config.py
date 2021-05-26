@@ -27,8 +27,8 @@ config.head = 'mlp_cls'
 config.radius = 0.05
 config.sampleDl = 0.02
 config.density_parameter = 5.0
+config.npoits = []
 config.nsamples = []
-config.npoints = []
 config.bn_momentum = 0.1
 config.point_transform = False
 config.feature_transform = False
@@ -73,6 +73,17 @@ config.log_dir = 'log'
 config.local_rank = 0
 config.amp_opt_level = ''
 config.rng_seed = 0
+
+# ---------------------------------------------------------------------------- #
+# pointnet2 specific
+# ---------------------------------------------------------------------------- #
+config.use_xyz = False
+# Note: npoints, nsamples is declared above
+config.npoints = []
+config.radii = []
+config.mlps = []
+config.mlps_fp = []
+
 
 # ---------------------------------------------------------------------------- #
 # Local Aggregation options
