@@ -1,0 +1,95 @@
+datasets: 's3dis'
+data_root: ''
+num_classes: 13
+input_features_dim: 4
+batch_size: 8
+num_points: 15000 # 15000
+num_workers: 4
+# data augmentation
+x_angle_range: 0.0
+y_angle_range: 0.0
+z_angle_range: 3.1415926
+scale_low: 0.7
+scale_high: 1.3
+noise_std: 0.001
+noise_clip: 0.05
+translate_range: 0.0
+color_drop: 0.2
+augment_symmetries:
+  - 1
+  - 0
+  - 0
+# ---------------------------------------------------------------------------- #
+# Model
+# ---------------------------------------------------------------------------- #
+backbone: 'pointnet2_sa'
+head: 'pointnet2_fp'
+radius: 0.1
+sampleDl: 0.04
+use_xyz: True
+# based on https://github.com/erikwijmans/Pointnet2_PyTorch/blob/master/pointnet2/models/pointnet2_ssg_sem.py
+npoints:
+  - 1024
+  - 256
+  - 64
+  - 16
+radii:
+  - 0.1
+  - 0.2
+  - 0.4
+  - 0.8
+nsamples:
+  - 32
+  - 32
+  - 32
+  - 32
+mlps: # each stage's mlp(point-wise leanring)
+  - [4, 32, 32, 64] # use 7 channels, 4 channels + 3 from xyz
+  - [64, 64, 64, 128]
+  - [128, 128, 128, 256]
+  - [256, 256, 256, 512]
+mlps_fp: # Feature propagation mlp list 
+  - [132, 128, 128, 128]
+  - [320, 256, 128]
+  - [384, 256, 256]
+  - [768, 256, 256]
+in_radius: 2.0
+num_steps: 2000
+# dropout_rate: 0.6
+# point_transform: False
+# feature_transform: False
+
+# ---------------------------------------------------------------------------- #
+# Training options
+# ---------------------------------------------------------------------------- #
+epochs: 600
+start_epoch: 1
+base_learning_rate: 0.01
+lr_scheduler: 'step'  # step,cosine
+optimizer: 'sgd'
+warmup_epoch:  -1
+lr_decay_steps: 1
+lr_decay_rate: 0.9885531
+weight_decay: 0.001
+momentum: 0.98
+
+# ---------------------------------------------------------------------------- #
+# io and misc
+# ---------------------------------------------------------------------------- #
+load_path: ''
+print_freq: 10
+save_freq: 10
+val_freq: 10
+log_dir: './output'
+local_rank: 0
+amp_opt_level: ''
+rng_seed: 0
+
+# ---------------------------------------------------------------------------- #
+# Local Aggregation options
+# ---------------------------------------------------------------------------- #
+# local_aggregation_type: 'pointwisemlp'
+# pointwisemlp:
+#   feature_type: 'dp_fi_df'
+#   num_mlps: 1
+#   reduction: 'max'
